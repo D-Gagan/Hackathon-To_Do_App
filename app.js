@@ -1,108 +1,123 @@
-// public/app.js
-document.addEventListener('DOMContentLoaded', () => {
-    fetchTasks();
-  });
-  
-  // Function to fetch tasks from the backend
-  function fetchTasks() {
-    fetch('http://localhost:3000/tasks')
-      .then(response => response.json())
-      .then(tasks => {
-        displayTasks(tasks);
-      })
-      .catch(error => console.error('Error fetching tasks:', error));
+// app.js - Backend
+const express = require('express');
+const bodyParser = require('body-parser');
+const mysql = require('mysql2/promise');
+
+const app = express();
+const port = 3000;
+
+const dbConfig = {
+  host: 'localhost',
+  user: 'root',
+  password: 'Ohhh###77@',
+  database: 'todo_app'
+};
+
+// Serve static files (HTML and JS) from the 'public' directory
+app.use(express.static('public'));
+
+app.use(bodyParser.json());
+
+const pool = mysql.createPool(dbConfig);
+
+async function initDatabase() {
+  const connection = await pool.getConnection();
+  try {
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS tasks (
+        id INT PRIMARY KEY AUTO_INCREMENT,
+        task VARCHAR(255) NOT NULL
+      )
+    `);
+  } finally {
+    connection.release();
   }
-  
-  // Function to display tasks on the webpage
-  function displayTasks(tasks) {
-    const taskListContainer = document.getElementById('taskList');
-    taskListContainer.innerHTML = ''; // Clear existing content
-  
-    const ul = document.createElement('ul');
-  
-    tasks.forEach(task => {
-      const li = document.createElement('li');
-      li.textContent = task.task;
-      ul.appendChild(li);
+}
+
+// Welcome message for the root path
+app.get('/', (req, res) => {
+  res.send('Welcome to the ToDo App!');
+});
+
+app.get('/tasks', async (req, res) => {
+  const connection = await pool.getConnection();
+  try {
+    const [rows] = await connection.query('SELECT * FROM tasks');
+    res.json(rows);
+  } finally {
+    connection.release();
+  }
+});
+
+app.post('/tasks', async (req, res) => {
+  const newTask = {
+    task: req.body.task
+  };
+
+  const connection = await pool.getConnection();
+  try {
+    const [result] = await connection.query('INSERT INTO tasks SET ?', [newTask]);
+    newTask.id = result.insertId;
+    res.status(201).json(newTask);
+  } finally {
+    connection.release();
+  }
+});
+
+app.put('/tasks/:id', async (req, res) => {
+  const taskId = parseInt(req.params.id);
+  const updatedTask = {
+    task: req.body.task
+  };
+
+  const connection = await pool.getConnection();
+  try {
+    const [result] = await connection.query('UPDATE tasks SET ? WHERE id = ?', [updatedTask, taskId]);
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ error: 'Task not found' });
+    }
+
+    updatedTask.id = taskId;
+    res.json(updatedTask);
+  } finally {
+    connection.release();
+  }
+});
+
+app.delete('/tasks/:id', async (req, res) => {
+  const taskId = parseInt(req.params.id);
+  const confirmationMessage = req.body.confirmation;
+
+  const connection = await pool.getConnection();
+
+  try {
+    const [taskResult] = await connection.query('SELECT * FROM tasks WHERE id = ?', [taskId]);
+
+    if (taskResult.length === 0) {
+      return res.status(404).json({ error: 'Task not found' });
+    }
+
+    // Validate confirmation message before deleting
+    const [confirmationResult] = await connection.query(
+      'DELETE FROM tasks WHERE id = ? AND task = ?',
+      [taskId, confirmationMessage]
+    );
+
+    if (confirmationResult.affectedRows === 0) {
+      return res.status(400).json({ error: 'Confirmation failed. Please provide the correct confirmation message.' });
+    }
+
+    res.json({ message: 'Task deleted successfully' });
+  } finally {
+    connection.release();
+  }
+});
+
+initDatabase()
+  .then(() => {
+    app.listen(port, () => {
+      console.log(`Server is running on http://localhost:${port}`);
     });
-  
-    taskListContainer.appendChild(ul);
-  }
-  
-  // Function to create a new task
-  function createTask() {
-    const task = prompt('Enter the task:');
-    if (task) {
-      fetch('/tasks', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ task }),
-      })
-        .then(() => fetchTasks())
-        .catch(error => console.error('Error creating task:', error));
-    }
-  }
-  
-  // Function to edit an existing task
-  // Function to edit an existing task
-// Function to edit an existing task
-function editTask() {
-    const taskId = prompt('Enter the task ID to edit:');
-    if (taskId && !isNaN(taskId)) { // Check if taskId is a valid number
-      const task = prompt('Enter the updated task:');
-      if (task) {
-        fetch(`/tasks/${parseInt(taskId, 10)}`, { // Parse taskId to integer
-          method: 'PUT',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ task }),
-        })
-          .then(() => fetchTasks())
-          .catch(error => console.error('Error editing task:', error));
-      }
-    } else {
-      alert('Invalid task ID. Please enter a valid number.');
-    }
-  }
-  
-  
-  
-  // Function to delete an existing task
-  // Function to delete an existing task
-// Function to delete an existing task
-async function deleteTask() {
-    const taskId = prompt('Enter the task ID to delete:');
-    if (taskId && !isNaN(taskId)) { // Check if taskId is a valid number
-      const confirmation = prompt('Enter "CONFIRM" to delete the task:');
-      if (confirmation === 'CONFIRM') {
-        try {
-          const response = await fetch(`/tasks/${parseInt(taskId, 10)}`, { // Parse taskId to integer
-            method: 'DELETE',
-            headers: {
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({ confirmation }),
-          });
-  
-          if (response.ok) {
-            await fetchTasks(); // Update task list after successful deletion
-          } else {
-            const errorData = await response.json();
-            console.error(`Error deleting task: ${errorData.error}`);
-          }
-        } catch (error) {
-          console.error('Error deleting task:', error);
-        }
-      } else {
-        alert('Deletion canceled. Please provide the correct confirmation message.');
-      }
-    } else {
-      alert('Invalid task ID. Please enter a valid number.');
-    }
-  }
-  
-  //Unable to fetch proper id for delete operation
-  //Guess need to use AJAX for updating
+  })
+  .catch(err => console.error('Error initializing database:', err));
